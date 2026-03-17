@@ -1,0 +1,10 @@
+# Simulation binaries
+sim_*
+
+# VCD waveform dumps
+*.vcd
+
+# CocoTB build artifacts
+sim_build/
+__pycache__/
+results.xml
