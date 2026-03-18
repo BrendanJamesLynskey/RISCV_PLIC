@@ -224,6 +224,15 @@ gtkwave tb_plic_gateway.vcd
 | `plic_top` | 12 | 7 | 19 |
 | **Total** | **65** | **41** | **106** |
 
+## Design Notes
+
+- **iverilog compatibility** — the priority resolver and register file use `always @(*)` rather than `always_comb` to avoid spurious zero-time oscillation loops in Icarus Verilog. Enable arrays are stored flattened for the same reason (iverilog does not support unpacked arrays in port connections).
+- **Parameter ranges** — `NUM_SOURCES` supports 1–1023, `NUM_TARGETS` supports 1–15 872, `PRIO_BITS` supports 1–8. Wider ranges are architecturally valid but untested.
+- **Single-depth claim tracking** — each target tracks one in-service interrupt at a time. A nested claim updates `in_service_id` to the new winner; completing the new interrupt reopens the original gateway but does not restore the previous in-service context. This matches the PLIC spec (which does not require a claim stack) but means software should complete interrupts in LIFO order to avoid lost completions.
+- **Bus interface** — a minimal valid/ready single-cycle bus is used intentionally; a bridge to AXI4-Lite or Wishbone can be added externally without modifying the PLIC core.
+
+For deeper design rationale and implementation trade-offs, see [`docs/plic_technical_report.md`](docs/plic_technical_report.md).
+
 ## Author
 
 Brendan Lynskey 2025
