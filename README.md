@@ -60,7 +60,7 @@ A fully synthesisable, parameterised RISC-V Platform-Level Interrupt Controller 
 plic_top
 ├── plic_pkg                       — shared parameters, types, address constants
 ├── plic_gateway      (×NUM_SOURCES) — per-source interrupt capture (edge/level)
-├── plic_priority_resolver (×NUM_TARGETS)  — combinational priority arbiter
+├── plic_priority_resolver (×NUM_TARGETS)  — 2-stage pipelined priority arbiter
 ├── plic_target       (×NUM_TARGETS) — claim/complete FSM, eip generation
 └── plic_reg_file     (×1)           — address decode, register storage, bus interface
 ```
@@ -69,7 +69,7 @@ plic_top
 |--------|------|-------------|
 | `plic_pkg` | `rtl/plic_pkg.sv` | Package with default parameters, address region bases, per-target offsets, trigger mode type |
 | `plic_gateway` | `rtl/plic_gateway.sv` | Captures interrupt events; holds pending until claim/complete. Level mode: `pending = irq_source & gateway_open`. Edge mode: latches rising edge, clears on claim |
-| `plic_priority_resolver` | `rtl/plic_priority_resolver.sv` | Purely combinational. Scans all sources, outputs the highest-priority enabled pending source whose priority exceeds the threshold |
+| `plic_priority_resolver` | `rtl/plic_priority_resolver.sv` | 2-stage pipelined arbiter. Stage 1: qualifies sources and selects per-group winners (groups of 8). Stage 2: selects overall winner from group winners. Outputs are registered |
 | `plic_target` | `rtl/plic_target.sv` | Two-state FSM (`IDLE`/`CLAIMED`). Manages `in_service_id`, generates one-hot claim/complete vectors to gateways. `eip = irq_valid` |
 | `plic_reg_file` | `rtl/plic_reg_file.sv` | Decodes the PLIC memory map, stores priority/enable/threshold registers, generates claim/complete pulses on target register access |
 | `plic_top` | `rtl/plic_top.sv` | Instantiates and wires all submodules. ORs claim/complete vectors across targets per source |
@@ -242,6 +242,27 @@ Brendan Lynskey 2025
 [MIT](LICENSE)
 
 ---
+
+## Timing Optimisation
+
+### Goal
+
+Achieve ~100 MHz Fmax on Xilinx 7 Series (Artix-7) to match the target clock frequency of the SoC integration.
+
+### Problem
+
+The original design resolved interrupt priority combinationally in a single cycle. With 32 interrupt sources, the priority resolver used a linear scan (chained if-else comparisons across all sources), creating a dependency chain of 57 logic levels and 42.5 ns of routing delay. This limited Fmax to ~20 MHz (WNS: -40.779 ns at 100 MHz target).
+
+### Solution
+
+The priority resolution path in `plic_priority_resolver` was split into 2 pipeline stages:
+
+1. **Stage 1 — Qualification + group winner selection** — sources are divided into groups of 8. Within each group, sources are qualified (pending AND enabled AND priority > threshold) and the highest-priority winner is selected. The 4 group winners are registered.
+2. **Stage 2 — Final selection + output register** — the overall winner is selected from the 4 group winners. The final `max_id`, `max_prio`, and `irq_valid` outputs are registered.
+
+This adds 2 cycles of latency to interrupt notification, which is within the RISC-V PLIC specification (the spec does not mandate single-cycle resolution). The claim/complete interface semantics and all memory-mapped register addresses are unchanged. The `eip` output to each hart follows the registered `irq_valid` signal.
+
+All 65 SystemVerilog testbenches pass without modification to the top-level or target/gateway/reg_file tests. The resolver testbench was updated to use clock-synchronous stimulus matching the new pipelined interface.
 
 ## Synthesis Results
 

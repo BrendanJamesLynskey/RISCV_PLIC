@@ -113,6 +113,8 @@ module plic_top #(
                 .NUM_SOURCES(NUM_SOURCES),
                 .PRIO_BITS(PRIO_BITS)
             ) u_resolver (
+                .clk(clk),
+                .srst(srst),
                 .pending(pending),
                 .enable(target_enable[t]),
                 .source_prio(source_prio),
