@@ -132,6 +132,7 @@ module plic_top #(
 | `PRIO_BITS` | 3 | Bits per priority level — gives levels 0 (disabled) through 2^PRIO_BITS − 1 |
 | `ADDR_WIDTH` | 26 | Width of the memory-mapped address bus |
 | `DATA_WIDTH` | 32 | Width of the data bus |
+| `SYNC_STAGES` | 2 | Synchroniser flip-flop stages on interrupt inputs (0 = bypass) |
 
 ## File Structure
 
@@ -150,7 +151,8 @@ RISCV_PLIC/
 │   │   ├── tb_plic_priority_resolver.sv (12 tests)
 │   │   ├── tb_plic_target.sv            (12 tests)
 │   │   ├── tb_plic_reg_file.sv          (14 tests)
-│   │   └── tb_plic_top.sv              (12 tests)
+│   │   ├── tb_plic_top.sv              (12 tests × 2 sync configs)
+│   │   └── tb_plic_sync.sv            (4 tests)
 │   └── cocotb/                      # Python/CocoTB testbenches
 │       ├── test_plic_gateway/           (10 tests)
 │       ├── test_plic_priority_resolver/ (8 tests)
@@ -222,7 +224,9 @@ gtkwave tb_plic_gateway.vcd
 | `plic_target` | 12 | 8 | 20 |
 | `plic_reg_file` | 14 | 8 | 22 |
 | `plic_top` | 12 | 7 | 19 |
-| **Total** | **65** | **41** | **106** |
+| `plic_top` (SYNC_STAGES=0) | 12 | — | 12 |
+| `plic_sync` | 4 | — | 4 |
+| **Total** | **81** | **41** | **122** |
 
 ## Design Notes
 
@@ -242,6 +246,16 @@ Brendan Lynskey 2025
 [MIT](LICENSE)
 
 ---
+
+## Metastability Hardening
+
+Interrupt source inputs are asynchronous by default and are passed through a parameterisable synchroniser chain before entering the PLIC gateway logic.
+
+| Parameter | Default | Description |
+|-----------|:-------:|-------------|
+| `SYNC_STAGES` | 2 | Number of synchroniser flip-flop stages on each interrupt input. Set to 0 to bypass (for synchronous interrupt sources on the same clock domain). |
+
+The synchroniser FFs are annotated with `(* ASYNC_REG = "TRUE" *)` for optimal placement on Xilinx devices. The synchroniser adds `SYNC_STAGES` clock cycles of latency to interrupt detection (in addition to the 2-cycle pipeline latency in the priority resolver).
 
 ## Timing Optimisation
 

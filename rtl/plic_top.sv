@@ -1,10 +1,11 @@
 // Brendan Lynskey 2025
 module plic_top #(
-    parameter NUM_SOURCES = 32,
-    parameter NUM_TARGETS = 2,
-    parameter PRIO_BITS   = 3,
-    parameter ADDR_WIDTH  = 26,
-    parameter DATA_WIDTH  = 32
+    parameter NUM_SOURCES  = 32,
+    parameter NUM_TARGETS  = 2,
+    parameter PRIO_BITS    = 3,
+    parameter ADDR_WIDTH   = 26,
+    parameter DATA_WIDTH   = 32,
+    parameter SYNC_STAGES  = 2   // 2-FF metastability synchroniser; 0 = bypass
 ) (
     input  logic                     clk,
     input  logic                     srst,
@@ -53,6 +54,34 @@ module plic_top #(
     logic [NUM_TARGETS-1:0][NUM_SOURCES:1]    target_complete_vec;
 
     // ========================================
+    // Metastability synchroniser on interrupt inputs
+    // ========================================
+    logic [NUM_SOURCES:1] irq_synced;
+
+    generate
+        if (SYNC_STAGES > 0) begin : gen_sync
+            (* ASYNC_REG = "TRUE" *)
+            logic [NUM_SOURCES:1] sync_chain [0:SYNC_STAGES-1];
+
+            integer si;
+            always @(posedge clk) begin
+                if (srst) begin
+                    for (si = 0; si < SYNC_STAGES; si = si + 1)
+                        sync_chain[si] <= 0;
+                end else begin
+                    sync_chain[0] <= irq_sources;
+                    for (si = 1; si < SYNC_STAGES; si = si + 1)
+                        sync_chain[si] <= sync_chain[si-1];
+                end
+            end
+
+            assign irq_synced = sync_chain[SYNC_STAGES-1];
+        end else begin : gen_nosync
+            assign irq_synced = irq_sources;
+        end
+    endgenerate
+
+    // ========================================
     // Gateway instantiation
     // ========================================
     genvar s;
@@ -63,7 +92,7 @@ module plic_top #(
             ) u_gateway (
                 .clk(clk),
                 .srst(srst),
-                .irq_source(irq_sources[s]),
+                .irq_source(irq_synced[s]),
                 .claim(gateway_claim[s]),
                 .complete(gateway_complete[s]),
                 .pending(pending[s])

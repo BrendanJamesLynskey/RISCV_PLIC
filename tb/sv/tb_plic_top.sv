@@ -3,12 +3,17 @@
 
 module tb_plic_top;
 
-    parameter NUM_SOURCES = 32;
-    parameter NUM_TARGETS = 2;
-    parameter PRIO_BITS   = 3;
-    parameter ADDR_WIDTH  = 26;
-    parameter DATA_WIDTH  = 32;
-    parameter SRC_ID_BITS = $clog2(NUM_SOURCES+1);
+    parameter NUM_SOURCES  = 32;
+    parameter NUM_TARGETS  = 2;
+    parameter PRIO_BITS    = 3;
+    parameter ADDR_WIDTH   = 26;
+    parameter DATA_WIDTH   = 32;
+    parameter SYNC_STAGES  = 2;
+    parameter SRC_ID_BITS  = $clog2(NUM_SOURCES+1);
+
+    // Total latency from irq_sources change to eip update:
+    //   SYNC_STAGES (synchroniser) + 2 (pipeline)
+    localparam IRQ_LATENCY = SYNC_STAGES + 2;
 
     logic                     clk, srst;
     logic [NUM_SOURCES:1]     irq_sources;
@@ -27,7 +32,8 @@ module tb_plic_top;
         .NUM_TARGETS(NUM_TARGETS),
         .PRIO_BITS(PRIO_BITS),
         .ADDR_WIDTH(ADDR_WIDTH),
-        .DATA_WIDTH(DATA_WIDTH)
+        .DATA_WIDTH(DATA_WIDTH),
+        .SYNC_STAGES(SYNC_STAGES)
     ) dut (
         .clk(clk),
         .srst(srst),
@@ -64,6 +70,14 @@ module tb_plic_top;
             @(negedge clk);
             srst = 0;
             @(negedge clk);
+        end
+    endtask
+
+    // Wait for interrupt propagation: sync chain + pipeline
+    task wait_irq;
+        begin
+            repeat (IRQ_LATENCY) @(negedge clk);
+            #1;
         end
     endtask
 
@@ -150,10 +164,8 @@ module tb_plic_top;
             // Assert interrupt
             @(negedge clk);
             irq_sources[1] = 1;
-            // Wait for combinational propagation
-            @(negedge clk);
-            @(negedge clk);
-            #1;
+            // Wait for sync + pipeline propagation
+            wait_irq;
             if (eip[0] !== 1'b1) begin
                 total_tests = total_tests + 1;
                 $display("[FAIL] test_single_interrupt_flow — eip not asserted");
@@ -173,8 +185,8 @@ module tb_plic_top;
             // Deassert source
             @(negedge clk);
             irq_sources[1] = 0;
-            @(negedge clk);
-            @(negedge clk);
+            // Wait for deassert to propagate through sync + pipeline
+            wait_irq;
             check("test_single_interrupt_flow", eip[0] === 1'b0);
         end
     endtask
@@ -189,8 +201,7 @@ module tb_plic_top;
             @(negedge clk);
             irq_sources[3] = 1;
             irq_sources[5] = 1;
-            @(negedge clk);
-            @(negedge clk);
+            repeat (IRQ_LATENCY) @(negedge clk);
             // Claim — should get source 5 (higher priority)
             do_claim(0, rdata);
             check("test_priority_ordering", rdata === 32'd5);
@@ -210,9 +221,7 @@ module tb_plic_top;
             set_threshold(0, 3);
             @(negedge clk);
             irq_sources[1] = 1;
-            @(negedge clk);
-            @(negedge clk);
-            #1;
+            wait_irq;
             check("test_threshold_masking", eip[0] === 1'b0);
             @(negedge clk);
             irq_sources = 0;
@@ -228,9 +237,7 @@ module tb_plic_top;
             // Don't enable source 1
             @(negedge clk);
             irq_sources[1] = 1;
-            @(negedge clk);
-            @(negedge clk);
-            #1;
+            wait_irq;
             check("test_enable_masking", eip[0] === 1'b0);
             @(negedge clk);
             irq_sources = 0;
@@ -245,8 +252,7 @@ module tb_plic_top;
             set_enable(0, 32'h0000_0002);
             @(negedge clk);
             irq_sources[1] = 1;
-            @(negedge clk);
-            @(negedge clk);
+            repeat (IRQ_LATENCY) @(negedge clk);
             // Claim
             do_claim(0, rdata);
             // After claim, gateway closes → pending should drop
@@ -270,12 +276,12 @@ module tb_plic_top;
             set_enable(0, 32'h0000_0002);
             @(negedge clk);
             irq_sources[1] = 1;
-            @(negedge clk);
-            @(negedge clk);
+            repeat (IRQ_LATENCY) @(negedge clk);
             // Claim
             do_claim(0, rdata);
             // Complete — source still asserted, should re-trigger
             do_complete(0, 1);
+            // irq_synced is already stable at 1 — only pipeline latency needed
             @(negedge clk);
             @(negedge clk);
             #1;
@@ -297,9 +303,7 @@ module tb_plic_top;
             @(negedge clk);
             irq_sources[1] = 1;
             irq_sources[2] = 1;
-            @(negedge clk);
-            @(negedge clk);
-            #1;
+            wait_irq;
             check("test_two_targets", eip[0] === 1'b1 && eip[1] === 1'b1);
             @(negedge clk);
             irq_sources = 0;
@@ -317,8 +321,7 @@ module tb_plic_top;
             @(negedge clk);
             irq_sources[3] = 1;
             irq_sources[7] = 1;
-            @(negedge clk);
-            @(negedge clk);
+            repeat (IRQ_LATENCY) @(negedge clk);
             // Claim — should get source 3 (lower ID)
             do_claim(0, rdata);
             check("test_tie_breaking", rdata === 32'd3);
@@ -338,17 +341,14 @@ module tb_plic_top;
             // Source 1 fires
             @(negedge clk);
             irq_sources[1] = 1;
-            @(negedge clk);
-            @(negedge clk);
+            repeat (IRQ_LATENCY) @(negedge clk);
             do_claim(0, rdata);
             do_complete(0, 1);
             @(negedge clk);
             irq_sources[1] = 0;
             // Source 2 fires immediately
             irq_sources[2] = 1;
-            @(negedge clk);
-            @(negedge clk);
-            #1;
+            wait_irq;
             if (eip[0] !== 1'b1) begin
                 total_tests = total_tests + 1;
                 $display("[FAIL] test_back_to_back_interrupts — eip not asserted for source 2");
@@ -390,9 +390,7 @@ module tb_plic_top;
             irq_sources[2] = 1;
             irq_sources[3] = 1;
             irq_sources[4] = 1;
-            @(negedge clk);
-            @(negedge clk);
-            #1;
+            wait_irq;
             if (eip !== 2'b11) begin
                 total_tests = total_tests + 1;
                 $display("[FAIL] test_full_scenario — both eips should be asserted, got %b", eip);
@@ -420,14 +418,14 @@ module tb_plic_top;
             do_complete(1, 4);
             @(negedge clk);
             irq_sources = 0;
-            @(negedge clk);
-            @(negedge clk);
-            #1;
+            // Wait for deassert to propagate
+            wait_irq;
             check("test_full_scenario", eip === 2'b00);
         end
     endtask
 
     initial begin
+        $display("--- tb_plic_top (SYNC_STAGES=%0d) ---", SYNC_STAGES);
         reset;
 
         test_reset;

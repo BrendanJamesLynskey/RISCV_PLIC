@@ -23,7 +23,11 @@ run_test gateway    rtl/plic_pkg.sv rtl/plic_gateway.sv tb/sv/tb_plic_gateway.sv
 run_test resolver   rtl/plic_pkg.sv rtl/plic_priority_resolver.sv tb/sv/tb_plic_priority_resolver.sv
 run_test target     rtl/plic_pkg.sv rtl/plic_target.sv tb/sv/tb_plic_target.sv
 run_test reg_file   rtl/plic_pkg.sv rtl/plic_reg_file.sv tb/sv/tb_plic_reg_file.sv
-run_test top        rtl/plic_pkg.sv rtl/plic_gateway.sv rtl/plic_priority_resolver.sv rtl/plic_target.sv rtl/plic_reg_file.sv rtl/plic_top.sv tb/sv/tb_plic_top.sv
+ALL_RTL="rtl/plic_pkg.sv rtl/plic_gateway.sv rtl/plic_priority_resolver.sv rtl/plic_target.sv rtl/plic_reg_file.sv rtl/plic_top.sv"
+
+run_test top        $ALL_RTL tb/sv/tb_plic_top.sv
+run_test top_nosync $ALL_RTL tb/sv/tb_plic_top.sv -Ptb_plic_top.SYNC_STAGES=0
+run_test sync       $ALL_RTL tb/sv/tb_plic_sync.sv
 
 echo ""
 echo "=============================="
